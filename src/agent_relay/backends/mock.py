@@ -1,6 +1,6 @@
 """Mock backend for testing.
 
-Returns the prompt as the agent's reply, or raises an error for empty prompts.
+Returns the prompt as the agent's reply, or raises an error for "<FAIL>" prompt.
 """
 
 
@@ -18,7 +18,7 @@ class MockBackend:
 
     Behavior:
       - Returns the prompt string as the response
-      - Raises MockBackendError if prompt is empty string
+      - Raises MockBackendError if prompt is "<FAIL>"
     """
 
     def __init__(self, endpoint: str = ""):
@@ -39,8 +39,8 @@ class MockBackend:
             The prompt string echoed back.
 
         Raises:
-            MockBackendError: If prompt is an empty string.
+            MockBackendError: If prompt is "<FAIL>".
         """
-        if prompt == "":
-            raise MockBackendError("Empty prompt not allowed")
+        if prompt == "<FAIL>":
+            raise MockBackendError("Simulated backend failure")
         return prompt
