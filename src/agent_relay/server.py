@@ -25,19 +25,15 @@ async def inject_into_parent(message: str):
     print("===================================\n")
 
 
-async def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--acp-endpoint", required=True, help="Codex-ACP endpoint URL/address")
-    parser.add_argument("--max-concurrent", type=int, default=4, help="Max concurrent subagent jobs")
-    args = parser.parse_args()
+def create_tool_handlers(manager):
+    """Create tool handler functions with the given manager.
 
-    backend = ACPBackend(args.acp_endpoint)
-    manager = JobManager(backend, inject_into_parent, max_concurrent=args.max_concurrent)
+    Returns a dict with 'delegate' and 'status' async handler functions.
+    Extracted for testability.
+    """
 
-    server = MCPServer("mcp-subagent-mvp")
-
-    # --- delegate tool ---
     async def delegate(prompt: str, block: bool = False):
+        """Launch a subagent task (injection-first; result is not returned via tool)."""
         job = manager.create_job(prompt)
         task = asyncio.create_task(manager.run_job(job))
 
@@ -50,14 +46,25 @@ async def main():
         await task
         return {"subagent_id": job.id, "state": job.state.value}
 
-    # --- status tool (debug/manual) ---
     async def status(subagent_id: str):
+        """Get subagent status (debug/manual; avoid polling in normal operation)."""
         job = manager.get_job(subagent_id)
         return {
             "state": job.state.value,
             "result": job.result,  # Debug only; normal flow uses injection.
             "error": job.error,
         }
+
+    return {"delegate": delegate, "status": status}
+
+
+def create_server(manager):
+    """Create and configure the MCP server with the given manager.
+
+    Extracted for testability.
+    """
+    server = MCPServer("mcp-subagent-mvp")
+    handlers = create_tool_handlers(manager)
 
     server.add_tool(
         Tool(
@@ -71,7 +78,7 @@ async def main():
                 },
                 "required": ["prompt"],
             },
-            handler=delegate,
+            handler=handlers["delegate"],
         )
     )
 
@@ -84,10 +91,23 @@ async def main():
                 "properties": {"subagent_id": {"type": "string"}},
                 "required": ["subagent_id"],
             },
-            handler=status,
+            handler=handlers["status"],
         )
     )
 
+    return server
+
+
+async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--acp-endpoint", required=True, help="Codex-ACP endpoint URL/address")
+    parser.add_argument("--max-concurrent", type=int, default=4, help="Max concurrent subagent jobs")
+    args = parser.parse_args()
+
+    backend = ACPBackend(args.acp_endpoint)
+    manager = JobManager(backend, inject_into_parent, max_concurrent=args.max_concurrent)
+
+    server = create_server(manager)
     await server.run_stdio()
 
 
