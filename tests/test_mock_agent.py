@@ -8,99 +8,11 @@ This does NOT test the prompt injection mechanism - only the tool call interface
 
 import asyncio
 import pytest
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Dict, Optional
 
 from mcp.server import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session
 
-
-class MockJobState(str, Enum):
-    """Mock job states matching the real JobState enum."""
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-@dataclass
-class MockJob:
-    """Mock job object returned by the mock manager."""
-    id: str
-    prompt: str
-    state: MockJobState = MockJobState.QUEUED
-    result: Optional[str] = None
-    error: Optional[str] = None
-
-
-class MockManager:
-    """Mock manager for testing MCP server tool calls in isolation.
-
-    Provides configurable behavior for testing different scenarios
-    without involving the real JobManager, backend, or injection logic.
-    """
-
-    def __init__(self):
-        self.jobs: Dict[str, MockJob] = {}
-        self._job_counter = 0
-        self._run_job_behavior = "complete"
-        self._run_job_result = "mock result"
-        self._run_job_error = "mock error"
-        self._run_job_started: Optional[asyncio.Event] = None
-        self._run_job_proceed: Optional[asyncio.Event] = None
-        # Track calls for verification
-        self.create_job_calls: list = []
-        self.run_job_calls: list = []
-        self.get_job_calls: list = []
-
-    def create_job(self, prompt: str) -> MockJob:
-        """Create a new mock job in queued state."""
-        self.create_job_calls.append({"prompt": prompt})
-        self._job_counter += 1
-        job_id = f"mock-job-{self._job_counter}"
-        job = MockJob(id=job_id, prompt=prompt, state=MockJobState.QUEUED)
-        self.jobs[job_id] = job
-        return job
-
-    def get_job(self, job_id: str) -> MockJob:
-        """Get a job by ID, raises KeyError if not found."""
-        self.get_job_calls.append({"job_id": job_id})
-        return self.jobs[job_id]
-
-    async def run_job(self, job: MockJob):
-        """Simulate running a job with configurable behavior."""
-        self.run_job_calls.append({"job_id": job.id})
-        job.state = MockJobState.RUNNING
-
-        if self._run_job_started:
-            self._run_job_started.set()
-
-        if self._run_job_proceed:
-            await self._run_job_proceed.wait()
-
-        if self._run_job_behavior == "complete":
-            job.state = MockJobState.COMPLETED
-            job.result = self._run_job_result
-        elif self._run_job_behavior == "fail":
-            job.state = MockJobState.FAILED
-            job.error = self._run_job_error
-
-    def configure_success(self, result: str = "mock result"):
-        """Configure run_job to complete successfully."""
-        self._run_job_behavior = "complete"
-        self._run_job_result = result
-
-    def configure_failure(self, error: str = "mock error"):
-        """Configure run_job to fail with an error."""
-        self._run_job_behavior = "fail"
-        self._run_job_error = error
-
-    def configure_slow_execution(self):
-        """Configure run_job to wait for explicit signal before completing."""
-        self._run_job_started = asyncio.Event()
-        self._run_job_proceed = asyncio.Event()
-        return self._run_job_started, self._run_job_proceed
+from tests.mock import MockAgent, MockJobState, MockManager
 
 
 def create_mcp_server(manager: MockManager) -> FastMCP:
@@ -134,52 +46,6 @@ def create_mcp_server(manager: MockManager) -> FastMCP:
         }
 
     return mcp
-
-
-class MockAgent:
-    """Mock agent that makes tool calls through the MCP protocol.
-
-    This agent connects to an actual MCP server and makes tool calls
-    through the client session, mimicking how a real agent would interact.
-    """
-
-    def __init__(self, client_session):
-        self._session = client_session
-        self.tool_calls: list = []
-
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Make a tool call through the MCP protocol.
-
-        This sends an actual MCP tools/call request to the server.
-        """
-        self.tool_calls.append({
-            "tool": tool_name,
-            "arguments": arguments.copy()
-        })
-
-        result = await self._session.call_tool(tool_name, arguments)
-
-        # Extract the result from MCP response
-        # MCP returns CallToolResult with content list
-        if result.content and len(result.content) > 0:
-            content = result.content[0]
-            # For structured output, the result is in the text field as JSON
-            if hasattr(content, 'text'):
-                import json
-                return json.loads(content.text)
-
-        return {}
-
-    async def delegate_task(self, prompt: str, block: bool = False) -> Dict[str, Any]:
-        """Convenience method to call the delegate tool."""
-        args = {"prompt": prompt}
-        if block:
-            args["block"] = block
-        return await self.call_tool("delegate", args)
-
-    async def check_status(self, subagent_id: str) -> Dict[str, Any]:
-        """Convenience method to call the status tool."""
-        return await self.call_tool("status", {"subagent_id": subagent_id})
 
 
 @pytest.fixture
