@@ -1,11 +1,11 @@
-# HANDOVER — MCP Subagent MVP (Injection-first)
+# HANDOVER — AgentRelay MCP Subagent MVP (Injection-first)
 
 ## 1. Goals and constraints
 
-MVP requirements implemented by this skeleton:
-- Python implementation
+MVP requirements implemented:
+- Python 3.10+ implementation with asyncio
 - Standard MCP server interface using `mcp` (PyPI)
-- Single subagent backend selected at startup (Codex-ACP)
+- Pluggable subagent backends (Codex-ACP, Mock)
 - No database / persistence; state is in-memory structs
 - Core feature: result injection into parent context (no status polling loop)
 - `block=true` behaves like `block=false` except it waits and returns
@@ -18,35 +18,65 @@ Non-goals for MVP:
 - No security/auth
 - No cancellation tool
 
-## 2. Architecture overview
+## 2. Project structure
+
+```
+AgentRelay/
+├── src/agent_relay/              # Main package
+│   ├── __init__.py               # Package exports (Job, JobManager, JobState)
+│   ├── __main__.py               # Entry point for `python -m agent_relay`
+│   ├── server.py                 # MCP server setup and main() entry point
+│   ├── manager.py                # Core job management logic
+│   ├── handlers.py               # Tool handler functions (testable)
+│   ├── backends/                 # Pluggable backend implementations
+│   │   ├── __init__.py           # Backend exports
+│   │   ├── acp.py                # Codex-ACP backend adapter
+│   │   └── mock.py               # Mock backend for testing
+│   └── py.typed                  # PEP 561 marker for type hints
+├── tests/                        # Comprehensive test suite
+│   ├── __init__.py
+│   ├── test_mcp_tools.py         # MCP protocol integration tests
+│   └── test_mock_agent.py        # Mock agent workflow tests
+├── pyproject.toml                # Package configuration (hatch build system)
+├── README.md                     # Project vision and goals
+├── HANDOVER.md                   # This file
+└── LICENSE                       # MIT license
+```
+
+## 3. Architecture overview
 
 Single process, asyncio-based:
 
-- MCP server (`mcp_server.py`)
+- **MCP server** (`src/agent_relay/server.py`)
   - Tools:
     - `delegate(prompt, block=false)`
     - `status(subagent_id)`
   - Wires together:
     - `JobManager` (in-memory job registry + concurrency limiter)
-    - `ACPBackend` (Codex-ACP execution)
+    - Backend (ACPBackend or MockBackend)
     - `inject_into_parent()` (injection hook; MVP prints to stdout)
 
-- Core manager (`manager.py`)
-  - `JobState` enum
-  - `Job` dataclass
-  - `JobManager`
+- **Tool handlers** (`src/agent_relay/handlers.py`)
+  - Separated from server for testability
+  - Pure async functions without MCP dependencies
+  - `create_tool_handlers(manager)` returns delegate and status handlers
+
+- **Core manager** (`src/agent_relay/manager.py`)
+  - `JobState` enum: QUEUED, RUNNING, COMPLETED, FAILED
+  - `Job` dataclass: id, prompt, state, result, error
+  - `JobManager`:
     - Creates jobs
     - Runs jobs via backend with a semaphore for concurrency control
     - Calls injection callback with a canonical completion message
 
-- Codex-ACP backend adapter (`backend_acp.py`)
-  - `ACPBackend.run(prompt) -> str` (async)
-  - Uses `run_in_executor()` for synchronous clients
+- **Backends** (`src/agent_relay/backends/`)
+  - `ACPBackend` (`acp.py`): Codex-ACP execution adapter
+  - `MockBackend` (`mock.py`): Echo backend for testing (fails on `"<FAIL>"`)
 
-## 3. Injection-first invariant (critical)
+## 4. Injection-first invariant (critical)
 
-- MCP tool results never contain subagent output.
-- Subagent output is delivered only via the injection callback.
+- MCP tool results **never** contain subagent output.
+- Subagent output is delivered **only** via the injection callback.
 
 MVP injection behavior:
 - `inject_into_parent()` prints to stdout.
@@ -54,7 +84,7 @@ MVP injection behavior:
 Next step:
 - Replace the injector to append a message into the parent Codex run context.
 
-## 4. Tool semantics
+## 5. Tool semantics
 
 ### delegate(prompt, block=false)
 
@@ -76,22 +106,57 @@ If `block=true`:
 - Returns in-memory state
 - Debug/manual only; avoid polling in normal flow
 
-## 5. Concurrency
+## 6. Concurrency
 
 - `JobManager` uses `asyncio.Semaphore(max_concurrent)`
-- Adjust via `--max-concurrent`
+- Adjust via `--max-concurrent` CLI flag (default: 4)
 
-## 6. Implementation plan (incremental)
+## 7. Testing
 
-1) Verify MCP tool surface
-2) Stub backend (fake delay + static result)
-3) Integrate codex-acp
-4) Integrate real injection into Codex host
-5) Add cancel tool (optional)
+The project has comprehensive test coverage:
 
-## 7. Notes on codex-acp integration
+- **`test_mcp_tools.py`**: MCP protocol integration tests
+  - Tests tool calls through actual MCP server
+  - Validates delegate and status tool responses
+  - Tests blocking vs non-blocking behavior
+  - Verifies injection-first invariant
 
-`backend_acp.py` contains placeholder pseudocode.
+- **`test_mock_agent.py`**: Mock agent workflow tests
+  - Tests tool handlers in isolation
+  - Uses MockManager for deterministic behavior
+  - Covers state transitions and error handling
+
+Run tests:
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## 8. How to run
+
+### Installation
+
+```bash
+# Install package with dev dependencies
+pip install -e ".[dev]"
+
+# Or install runtime only
+pip install -e .
+```
+
+### Running the server
+
+```bash
+# Using the entry point
+agent-relay --acp-endpoint <YOUR_ENDPOINT> --max-concurrent 4
+
+# Or as a module
+python -m agent_relay --acp-endpoint <YOUR_ENDPOINT> --max-concurrent 4
+```
+
+## 9. Notes on codex-acp integration
+
+`src/agent_relay/backends/acp.py` contains placeholder pseudocode.
 Update:
 - `start_session()`
 - `session.send(prompt)`
@@ -99,17 +164,26 @@ Update:
 - `response.text`
 to match your codex-acp version.
 
-## 8. Suggested next extensions
+## 10. Implementation status
 
-- `cancel(subagent_id)`
+Completed:
+- [x] MCP tool surface (delegate, status)
+- [x] Core job manager with state machine
+- [x] Concurrency control via semaphore
+- [x] Injection-first result delivery
+- [x] Mock backend for testing
+- [x] Comprehensive test suite
+- [x] Package structure with pyproject.toml
+
+In progress:
+- [ ] Integrate real codex-acp API
+- [ ] Integrate real injection into Codex host
+
+## 11. Suggested next extensions
+
+- `cancel(subagent_id)` tool
 - Structured JSON injection
 - Progress events
 - Per-parent job grouping
 - Pub/sub for multiple parent sessions
-
-## 9. How to run
-
-```bash
-pip install mcp
-# install codex-acp per its repo instructions
-python mcp_server.py --acp-endpoint <YOUR_ENDPOINT> --max-concurrent 4
+- Durable state and recovery
