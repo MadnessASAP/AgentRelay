@@ -8,7 +8,7 @@ from mcp.server import MCPServer
 from mcp.types import Tool
 
 from .manager import JobManager
-from .backend_acp import ACPBackend
+from .backends import ACPBackend
 
 
 async def inject_into_parent(message: str):
