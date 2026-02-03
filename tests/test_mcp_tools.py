@@ -6,98 +6,9 @@ testing what a tool caller would see. Only server.py is tested - the manager is 
 
 import asyncio
 import pytest
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
-from unittest.mock import AsyncMock
 
 from agent_relay.handlers import create_tool_handlers
-
-
-class MockJobState(str, Enum):
-    """Mock job states matching the real JobState enum."""
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-@dataclass
-class MockJob:
-    """Mock job object returned by the mock manager."""
-    id: str
-    prompt: str
-    state: MockJobState = MockJobState.QUEUED
-    result: Optional[str] = None
-    error: Optional[str] = None
-
-
-class MockManager:
-    """Mock manager for testing server.py in isolation.
-
-    This mock allows precise control over job creation and state transitions
-    without involving the real JobManager, backend, or injection logic.
-    """
-
-    def __init__(self):
-        self.jobs = {}
-        self._job_counter = 0
-        self._run_job_behavior = "complete"  # "complete", "fail", or "hang"
-        self._run_job_result = "mock result"
-        self._run_job_error = "mock error"
-        self._run_job_started = None  # Event to signal job started
-        self._run_job_proceed = None  # Event to allow job to complete
-
-    def create_job(self, prompt: str) -> MockJob:
-        """Create a new mock job in queued state."""
-        self._job_counter += 1
-        job_id = f"mock-job-{self._job_counter}"
-        job = MockJob(id=job_id, prompt=prompt, state=MockJobState.QUEUED)
-        self.jobs[job_id] = job
-        return job
-
-    def get_job(self, job_id: str) -> MockJob:
-        """Get a job by ID, raises KeyError if not found."""
-        return self.jobs[job_id]
-
-    async def run_job(self, job: MockJob):
-        """Simulate running a job with configurable behavior."""
-        job.state = MockJobState.RUNNING
-
-        # Signal that job has started (for testing running state)
-        if self._run_job_started:
-            self._run_job_started.set()
-
-        # Wait for permission to proceed (for testing running state)
-        if self._run_job_proceed:
-            await self._run_job_proceed.wait()
-
-        if self._run_job_behavior == "complete":
-            job.state = MockJobState.COMPLETED
-            job.result = self._run_job_result
-        elif self._run_job_behavior == "fail":
-            job.state = MockJobState.FAILED
-            job.error = self._run_job_error
-        # "hang" behavior: never completes (for timeout testing)
-
-    def configure_success(self, result: str = "mock result"):
-        """Configure run_job to complete successfully."""
-        self._run_job_behavior = "complete"
-        self._run_job_result = result
-
-    def configure_failure(self, error: str = "mock error"):
-        """Configure run_job to fail with an error."""
-        self._run_job_behavior = "fail"
-        self._run_job_error = error
-
-    def configure_slow_execution(self):
-        """Configure run_job to wait for explicit signal before completing.
-
-        Returns (started_event, proceed_event) to control execution flow.
-        """
-        self._run_job_started = asyncio.Event()
-        self._run_job_proceed = asyncio.Event()
-        return self._run_job_started, self._run_job_proceed
+from tests.mock import MockJobState, MockManager
 
 
 @pytest.fixture
