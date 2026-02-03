@@ -132,6 +132,38 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### Fixing the last two failing tests
+
+Current `pytest` run (with `pytest-asyncio` installed) leaves two failing tests in `tests/test_manager.py`:
+1) `test_delegate_injects_result_into_calling_agent_prompt` fails because the client never receives any
+   injected messages via MCP notifications.
+2) `test_delegate_tool_requires_prompt` fails because the `delegate` tool call does not raise when
+   `prompt` is missing.
+
+To get them passing:
+
+1) **Make injection visible to the client session.**
+   - Today, `JobManager` calls the injected callback, but `inject_into_parent()` only prints.
+   - Add a transport that emits an MCP `notifications/message` notification to the client (or another
+     observable channel for the MCP session).
+   - The `PromptCapture` helper in `tests/test_manager.py` is listening for `LoggingMessageNotification`
+     with `params.data` containing the injected message. Hook the injection to send a logging notification
+     for that message.
+   - Suggested implementation: extend `create_server()` so it can accept an injection callback that can
+     access the MCP server/session and send `notifications/message` via the MCP server’s logging facilities,
+     or implement a simple in-memory broadcast that `PromptCapture` can receive (and update the test to
+     match the chosen approach).
+
+2) **Ensure tool input validation rejects missing `prompt`.**
+   - FastMCP’s `@tool` decorator does not enforce schema validation by default the way the old `Tool`
+     registration did.
+   - Options:
+     - Add explicit argument validation inside the `delegate` tool wrapper in `src/agent_relay/server.py`
+       (e.g., raise a `ValueError` when `prompt` is falsy/missing).
+     - Or, switch to using FastMCP’s structured tools with input schema validation if supported by the
+       installed `mcp` version.
+   - The test expects an exception to be raised on missing `prompt`.
+
 ## 8. How to run
 
 ### Installation

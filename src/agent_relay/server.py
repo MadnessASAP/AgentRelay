@@ -1,11 +1,7 @@
 import asyncio
 import argparse
 
-# NOTE:
-# The 'mcp' PyPI package API may differ slightly by version.
-# If MCPServer/Tool import paths differ, adjust here.
-from mcp.server import MCPServer
-from mcp.types import Tool
+from mcp.server import FastMCP
 
 from .manager import JobManager
 from .backends import ACPBackend
@@ -31,37 +27,16 @@ def create_server(manager):
 
     Extracted for testability.
     """
-    server = MCPServer("mcp-subagent-mvp")
+    server = FastMCP("mcp-subagent-mvp")
     handlers = create_tool_handlers(manager)
 
-    server.add_tool(
-        Tool(
-            name="delegate",
-            description="Launch a subagent task (injection-first; result is not returned via tool).",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string"},
-                    "block": {"type": "boolean"},
-                },
-                "required": ["prompt"],
-            },
-            handler=handlers["delegate"],
-        )
-    )
+    @server.tool(description="Launch a subagent task (injection-first; result is not returned via tool).")
+    async def delegate(prompt: str, block: bool = False):
+        return await handlers["delegate"](prompt, block)
 
-    server.add_tool(
-        Tool(
-            name="status",
-            description="Get subagent status (debug/manual; avoid polling in normal operation).",
-            parameters={
-                "type": "object",
-                "properties": {"subagent_id": {"type": "string"}},
-                "required": ["subagent_id"],
-            },
-            handler=handlers["status"],
-        )
-    )
+    @server.tool(description="Get subagent status (debug/manual; avoid polling in normal operation).")
+    async def status(subagent_id: str):
+        return await handlers["status"](subagent_id)
 
     return server
 
@@ -76,7 +51,7 @@ async def main():
     manager = JobManager(backend, inject_into_parent, max_concurrent=args.max_concurrent)
 
     server = create_server(manager)
-    await server.run_stdio()
+    await server.run_stdio_async()
 
 
 if __name__ == "__main__":
