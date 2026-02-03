@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Optional
 from unittest.mock import AsyncMock
 
-from agent_relay.server import create_tool_handlers
+from agent_relay.handlers import create_tool_handlers
 
 
 class MockJobState(str, Enum):
