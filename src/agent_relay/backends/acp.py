@@ -24,7 +24,7 @@ class ACPBackend:
     def __init__(self, endpoint: str):
         if CodexACPClient is None:
             raise ImportError(
-                "codex-acp client import failed. Install/adjust codex-acp and update backend_acp.py."
+                "codex-acp client import failed. Install/adjust codex-acp and update backends/acp.py."
             )
         self.client = CodexACPClient(endpoint)
 
